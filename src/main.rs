@@ -42,6 +42,7 @@ fn main() {
             println!("Loading state from: {}", state_file);
             
             let mut world = ScenarioWorld::new();
+            world.register_contract(format!("file:{}", contract).as_str(), counter::ContractBuilder);
 
             let mut target_account = Account::new().code(format!("file:{}", contract).as_str());
         

@@ -1,0 +1,47 @@
+{
+    "buildInfo": {
+        "contractCrate": {
+            "name": "counter",
+            "version": "0.0.0"
+        },
+        "framework": {
+            "name": "multiversx-sc",
+            "version": "0.65.0"
+        }
+    },
+    "docs": [
+        "A simple counter contract for the local simulator POC."
+    ],
+    "name": "Counter",
+    "constructor": {
+        "inputs": [
+            {
+                "name": "initial_value",
+                "type": "u64"
+            }
+        ],
+        "outputs": []
+    },
+    "endpoints": [
+        {
+            "name": "get",
+            "rustMethodName": "counter",
+            "mutability": "readonly",
+            "inputs": [],
+            "outputs": [
+                {
+                    "type": "u64"
+                }
+            ]
+        },
+        {
+            "name": "increment",
+            "mutability": "mutable",
+            "inputs": [],
+            "outputs": []
+        }
+    ],
+    "esdtAttributes": [],
+    "hasCallback": false,
+    "types": {}
+}

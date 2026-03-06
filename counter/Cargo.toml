@@ -1,0 +1,24 @@
+[package]
+name = "counter"
+version = "0.0.0"
+edition = "2024"
+publish = false
+authors = ["you"]
+
+[lib]
+path = "src/counter.rs"
+
+[dependencies.multiversx-sc]
+version = "0.65.0"
+
+[dev-dependencies]
+num-bigint = "0.4"
+
+[dev-dependencies.multiversx-sc-scenario]
+version = "0.65.0"
+
+[workspace]
+members = [
+    ".",
+    "meta",
+]

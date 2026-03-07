@@ -671,6 +671,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "counter",
+ "hex",
  "multiversx-sc-scenario",
  "serde",
  "serde_json",

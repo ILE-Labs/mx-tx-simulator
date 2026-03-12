@@ -1,8 +1,9 @@
+use crate::gas::GasEstimate;
 use crate::response::{ExecutionStatus, StorageChange, TransactionResult};
 use serde_json::{json, Value};
 
 /// Format a TransactionResult into a pretty JSON output
-pub fn format_result(result: &TransactionResult, target_address: &str) -> Value {
+pub fn format_result(result: &TransactionResult, target_address: &str, gas_estimate: &GasEstimate) -> Value {
     // Format execution status
     let (status_str, summary) = match &result.status {
         ExecutionStatus::Success => ("success", "Transaction executed successfully"),
@@ -16,12 +17,27 @@ pub fn format_result(result: &TransactionResult, target_address: &str) -> Value 
         ),
     };
 
-    // Format gas information
+    // Format gas information with GoVM-style breakdown
+    let breakdown: Vec<Value> = gas_estimate
+        .breakdown
+        .iter()
+        .map(|item| {
+            json!({
+                "operation": item.operation,
+                "cost": item.cost
+            })
+        })
+        .collect();
+
     let gas_info = json!({
         "limit": result.gas_limit,
-        "used": result.gas_used,
-        "remaining": result.gas_limit.saturating_sub(result.gas_used),
-        "confidence": "high (VM Dry-Run)"
+        "estimated_total": gas_estimate.total_estimated,
+        "wasm_execution": gas_estimate.wasm_execution,
+        "base_cost": gas_estimate.base_cost,
+        "storage_ops": gas_estimate.storage_ops,
+        "confidence": gas_estimate.confidence,
+        "method": gas_estimate.method,
+        "breakdown": breakdown
     });
 
     // Format state changes
@@ -101,8 +117,38 @@ pub fn format_result(result: &TransactionResult, target_address: &str) -> Value 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::gas::{GasCostItem, GasEstimate};
     use crate::response::{ExecutionStatus, StateDiff, StorageChange, TransactionResult};
     use std::collections::HashMap;
+
+    fn make_test_gas_estimate() -> GasEstimate {
+        GasEstimate {
+            wasm_execution: 1000,
+            base_cost: 50000,
+            storage_ops: 125000,
+            total_estimated: 176000,
+            confidence: "medium (WASM metering + schedule estimation)".into(),
+            method: "GoVM-inspired: GasSchedule V8 costs + WASM opcode metering".into(),
+            breakdown: vec![
+                GasCostItem {
+                    operation: "base_transaction_cost".into(),
+                    cost: 50000,
+                },
+                GasCostItem {
+                    operation: "storage_load".into(),
+                    cost: 50000,
+                },
+                GasCostItem {
+                    operation: "storage_store".into(),
+                    cost: 75000,
+                },
+                GasCostItem {
+                    operation: "wasm_execution (measured)".into(),
+                    cost: 1000,
+                },
+            ],
+        }
+    }
 
     #[test]
     fn test_format_success_result() {
@@ -125,13 +171,21 @@ mod tests {
             error_message: None,
         };
 
-        let output = format_result(&result, "sc:target_contract");
+        let gas_estimate = make_test_gas_estimate();
+        let output = format_result(&result, "sc:target_contract", &gas_estimate);
 
         assert_eq!(output["execution"]["status"], "success");
-        assert_eq!(output["gas"]["used"], 2500000);
-        assert_eq!(output["gas"]["remaining"], 7500000);
+        assert_eq!(output["gas"]["estimated_total"], 176000);
+        assert_eq!(output["gas"]["wasm_execution"], 1000);
+        assert_eq!(output["gas"]["base_cost"], 50000);
+        assert_eq!(output["gas"]["storage_ops"], 125000);
         assert_eq!(output["return_values"][0], "0x06");
         assert!(output["errors"].is_null());
+
+        // Check gas breakdown
+        let breakdown = output["gas"]["breakdown"].as_array().unwrap();
+        assert_eq!(breakdown.len(), 4);
+        assert_eq!(breakdown[0]["operation"], "base_transaction_cost");
 
         // Check state changes
         let changes = &output["state_changes"][0]["storage"];
@@ -158,7 +212,8 @@ mod tests {
             error_message: Some("function not found".to_string()),
         };
 
-        let output = format_result(&result, "sc:target_contract");
+        let gas_estimate = make_test_gas_estimate();
+        let output = format_result(&result, "sc:target_contract", &gas_estimate);
 
         assert_eq!(output["execution"]["status"], "failed");
         assert_eq!(output["errors"]["code"], 4);

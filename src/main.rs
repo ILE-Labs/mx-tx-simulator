@@ -1,14 +1,17 @@
 mod errors;
 mod formatter;
+mod gas;
 mod response;
 mod state;
 
 use clap::{Parser, Subcommand};
 use errors::SimulationError;
 use formatter::format_result;
+use gas::GasEstimator;
 use multiversx_sc_scenario::{
+    scenario::run_vm::ExecutorConfig,
     scenario::ScenarioRunner,
-    scenario_model::{ScCallStep, TxExpect},
+    scenario_model::ScCallStep,
     ScenarioWorld,
 };
 use response::{StateSnapshot, TransactionResult};
@@ -70,8 +73,9 @@ fn run_simulation(cli: Cli) -> Result<(), SimulationError> {
             println!("Booting MultiversX Local Simulator...");
             println!("Loading state from: {}", state_file);
 
-            // Initialize ScenarioWorld
-            let mut world = ScenarioWorld::new();
+            // Initialize ScenarioWorld with Experimental executor for WASM gas metering
+            let mut world = ScenarioWorld::new()
+                .executor_config(ExecutorConfig::Experimental);
             world.register_contract(
                 format!("file:{}", contract).as_str(),
                 counter::ContractBuilder,
@@ -110,24 +114,20 @@ fn run_simulation(cli: Cli) -> Result<(), SimulationError> {
             // Execute transaction
             world.run_sc_call_step(&mut tx);
 
-            // Debug: Print response details
-            if let Some(ref response) = tx.response {
-                eprintln!("DEBUG: Gas used: {}", response.gas_used);
-                eprintln!("DEBUG: Status: {:?}", response.tx_error.status);
-                eprintln!("DEBUG: Message: {}", response.tx_error.message);
-            } else {
-                eprintln!("DEBUG: No response!");
-            }
-
             // Capture state AFTER execution
-            // Note: For POC, we extract from response
             let after_state = StateSnapshot::empty();
 
             // Extract transaction result
             let result = TransactionResult::from_response(&tx, &before_state, &after_state, *gas_limit);
 
+            // Run gas estimation
+            let estimator = GasEstimator::new();
+            let wasm_gas = result.gas_used;
+            let data_len = function.len(); // Approximate tx data size
+            let gas_estimate = estimator.estimate(wasm_gas, function, data_len);
+
             // Format and print output
-            let output = format_result(&result, target_address);
+            let output = format_result(&result, target_address, &gas_estimate);
             println!("\nSimulation Result:\n-----------------");
             println!("{}", serde_json::to_string_pretty(&output).unwrap());
 

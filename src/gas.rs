@@ -36,8 +36,7 @@ impl GasEstimator {
     /// On MultiversX: min_gas_limit = 50,000, data = 1,500 gas/byte
     fn estimate_base_cost(&self, data_len: usize) -> (u64, GasCostItem) {
         let min_gas: u64 = 50_000;
-        let data_gas =
-            data_len as u64 * self.schedule.base_operation_cost.data_copy_per_byte;
+        let data_gas = data_len as u64 * self.schedule.base_operation_cost.data_copy_per_byte;
         let total = min_gas + data_gas;
 
         (
@@ -45,9 +44,7 @@ impl GasEstimator {
             GasCostItem {
                 operation: format!(
                     "base_transaction_cost (min: {}, data: {} bytes x {})",
-                    min_gas,
-                    data_len,
-                    self.schedule.base_operation_cost.data_copy_per_byte
+                    min_gas, data_len, self.schedule.base_operation_cost.data_copy_per_byte
                 ),
                 cost: total,
             },
@@ -56,11 +53,7 @@ impl GasEstimator {
 
     /// Estimate storage operation costs based on the function being called.
     /// Every SC call does at least 1 storage_load. Write operations add storage_store.
-    fn estimate_storage_costs(
-        &self,
-        _function: &str,
-        is_view: bool,
-    ) -> (u64, Vec<GasCostItem>) {
+    fn estimate_storage_costs(&self, _function: &str, is_view: bool) -> (u64, Vec<GasCostItem>) {
         let mut items = Vec::new();
         let mut total = 0u64;
 
@@ -86,12 +79,7 @@ impl GasEstimator {
     }
 
     /// Combine all gas sources into a final prediction
-    pub fn estimate(
-        &self,
-        wasm_gas_used: u64,
-        function: &str,
-        data_len: usize,
-    ) -> GasEstimate {
+    pub fn estimate(&self, wasm_gas_used: u64, function: &str, data_len: usize) -> GasEstimate {
         // Determine if this is likely a view function
         let is_view = function == "get"
             || function.starts_with("get_")
@@ -102,8 +90,7 @@ impl GasEstimator {
             || function == "symbol";
 
         let (base_cost, base_item) = self.estimate_base_cost(data_len);
-        let (storage_ops, storage_items) =
-            self.estimate_storage_costs(function, is_view);
+        let (storage_ops, storage_items) = self.estimate_storage_costs(function, is_view);
 
         // Build breakdown
         let mut breakdown = vec![base_item];
@@ -130,8 +117,7 @@ impl GasEstimator {
             storage_ops,
             total_estimated: total,
             confidence,
-            method: "GoVM-inspired: GasSchedule V8 costs + WASM opcode metering"
-                .into(),
+            method: "GoVM-inspired: GasSchedule V8 costs + WASM opcode metering".into(),
             breakdown,
         }
     }

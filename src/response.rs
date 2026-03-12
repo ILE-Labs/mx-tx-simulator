@@ -15,6 +15,7 @@ impl StateSnapshot {
     }
 
     /// Manually add a storage entry to the snapshot
+    #[allow(dead_code)]
     pub fn add_storage(&mut self, key: String, value: String) {
         self.storage.insert(key, value);
     }
@@ -168,7 +169,10 @@ mod tests {
         assert_eq!(diff.storage_changes.len(), 1);
 
         match diff.storage_changes.get("str:counter") {
-            Some(StorageChange::Modified { before: b, after: a }) => {
+            Some(StorageChange::Modified {
+                before: b,
+                after: a,
+            }) => {
                 assert_eq!(b, "5");
                 assert_eq!(a, "6");
             }

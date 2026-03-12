@@ -49,8 +49,8 @@ impl StateConfig {
         for (addr, account_config) in &config.accounts {
             if let Some(code_path) = &account_config.code {
                 // Extract actual file path from "file:path" format
-                let file_path = if code_path.starts_with("file:") {
-                    &code_path[5..]
+                let file_path = if let Some(stripped) = code_path.strip_prefix("file:") {
+                    stripped
                 } else {
                     code_path.as_str()
                 };
@@ -87,7 +87,9 @@ impl StateConfig {
 
             // Add all storage entries
             for (key, value) in account_config.storage {
-                account.storage.insert(key.as_str().into(), value.as_str().into());
+                account
+                    .storage
+                    .insert(key.as_str().into(), value.as_str().into());
             }
 
             // Add account to state setup

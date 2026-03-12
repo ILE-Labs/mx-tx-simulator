@@ -3,7 +3,11 @@ use crate::response::{ExecutionStatus, StorageChange, TransactionResult};
 use serde_json::{json, Value};
 
 /// Format a TransactionResult into a pretty JSON output
-pub fn format_result(result: &TransactionResult, target_address: &str, gas_estimate: &GasEstimate) -> Value {
+pub fn format_result(
+    result: &TransactionResult,
+    target_address: &str,
+    gas_estimate: &GasEstimate,
+) -> Value {
     // Format execution status
     let (status_str, summary) = match &result.status {
         ExecutionStatus::Success => ("success", "Transaction executed successfully"),

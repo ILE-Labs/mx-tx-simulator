@@ -1,0 +1,16 @@
+{
+  "accounts": {
+    "address:wallet1": {
+      "nonce": 0,
+      "balance": "1000000000000000000"
+    },
+    "sc:target_contract": {
+      "nonce": 0,
+      "balance": "0",
+      "code": "file:counter/output/counter.wasm",
+      "storage": {
+        "str:counter": "5"
+      }
+    }
+  }
+}

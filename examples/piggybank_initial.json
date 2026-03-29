@@ -1,0 +1,18 @@
+{
+  "accounts": {
+    "address:owner": {
+      "nonce": 0,
+      "balance": "1000000000000000000"
+    },
+    "sc:piggybank": {
+      "nonce": 0,
+      "balance": "0",
+      "code": "file:piggybank/output/piggybank.wasm",
+      "storage": {
+        "str:total": "0",
+        "str:num_deposits": "0",
+        "str:target": "100"
+      }
+    }
+  }
+}

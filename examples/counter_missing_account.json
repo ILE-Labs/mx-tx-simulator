@@ -1,0 +1,12 @@
+{
+  "accounts": {
+    "sc:target_contract": {
+      "nonce": 0,
+      "balance": "0",
+      "code": "file:counter/output/counter.wasm",
+      "storage": {
+        "str:counter": "5"
+      }
+    }
+  }
+}

@@ -21,7 +21,7 @@ pub fn format_result(
         ),
     };
 
-    // Format gas information with GoVM-style breakdown
+    // Format gas information with cost breakdown
     let breakdown: Vec<Value> = gas_estimate
         .breakdown
         .iter()
@@ -132,7 +132,7 @@ mod tests {
             storage_ops: 125000,
             total_estimated: 176000,
             confidence: "medium (WASM metering + schedule estimation)".into(),
-            method: "GoVM-inspired: GasSchedule V8 costs + WASM opcode metering".into(),
+            method: "GasSchedule V8 costs + WASM opcode metering".into(),
             breakdown: vec![
                 GasCostItem {
                     operation: "base_transaction_cost".into(),

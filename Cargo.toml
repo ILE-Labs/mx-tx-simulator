@@ -9,6 +9,7 @@ multiversx-sc-scenario = { version = "0.65.0", features = ["wasmer-experimental"
 
 clap = { version = "4.4", features = ["derive"] }
 counter = { path = "counter" }
+piggybank = { path = "piggybank" }
 
 multiversx-chain-vm = "0.22.0"
 

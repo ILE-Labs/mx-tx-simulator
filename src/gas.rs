@@ -1,6 +1,6 @@
 use multiversx_chain_vm::schedule::{GasSchedule, GasScheduleVersion};
 
-/// Gas estimator inspired by the GoVM's two-level gas model:
+/// Gas estimator using a two-level gas model:
 /// Level 1: WASM opcode costs (from Experimental executor)
 /// Level 2: API call costs (from GasSchedule)
 pub struct GasEstimator {
@@ -117,7 +117,7 @@ impl GasEstimator {
             storage_ops,
             total_estimated: total,
             confidence,
-            method: "GoVM-inspired: GasSchedule V8 costs + WASM opcode metering".into(),
+            method: "GasSchedule V8 costs + WASM opcode metering".into(),
             breakdown,
         }
     }

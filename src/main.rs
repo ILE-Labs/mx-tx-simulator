@@ -49,8 +49,10 @@ enum Commands {
         #[arg(long, default_value = "sc:target_contract")]
         target_address: String,
     },
-    /// Run the full demo showcasing all POC features
+    /// Run the counter scenario test
     Demo,
+    /// Run the piggybank scenario test (complex contract)
+    DemoPiggybank,
 }
 
 fn main() {
@@ -64,6 +66,7 @@ fn main() {
             }
         }
         Commands::Demo => run_demo(),
+        Commands::DemoPiggybank => run_demo_piggybank(),
     }
 }
 
@@ -81,6 +84,10 @@ fn execute_simulation(
     world.register_contract(
         format!("file:{}", contract).as_str(),
         counter::ContractBuilder,
+    );
+    world.register_contract(
+        "file:piggybank/output/piggybank.wasm",
+        piggybank::ContractBuilder,
     );
 
     let state_config = StateConfig::from_file(state_file)?;
@@ -145,87 +152,216 @@ fn run_simulate(command: &Commands) -> Result<(), SimulationError> {
     }
 }
 
-// ── F5: Demo Scenario ──────────────────────────────────────────────────
+// ── F5: Real Scenario Test ─────────────────────────────────────────────
 
 const DEMO_CONTRACT: &str = "counter/output/counter.wasm";
 const DEMO_STATE: &str = "examples/counter_initial.json";
-const DEMO_STATE_MISSING: &str = "examples/counter_missing_account.json";
 const DEMO_CALLER: &str = "address:wallet1";
 const DEMO_TARGET: &str = "sc:target_contract";
 const DEMO_GAS: u64 = 10_000_000;
+
+/// Execute a transaction against a persistent world (state carries across calls)
+fn execute_on_world(
+    world: &mut ScenarioWorld,
+    function: &str,
+    caller: &str,
+    gas_limit: u64,
+    target_address: &str,
+    args: &[&str],
+) -> (TransactionResult, serde_json::Value) {
+    let before_state = StateSnapshot::empty();
+
+    let mut tx = ScCallStep::new()
+        .from(caller)
+        .to(target_address)
+        .function(function)
+        .gas_limit(gas_limit);
+
+    for arg in args {
+        tx = tx.argument(*arg);
+    }
+
+    tx = tx.no_expect();
+
+    world.run_sc_call_step(&mut tx);
+
+    let after_state = StateSnapshot::empty();
+    let result = TransactionResult::from_response(&tx, &before_state, &after_state, gas_limit);
+
+    let estimator = GasEstimator::new();
+    let gas_estimate = estimator.estimate(result.gas_used, function, function.len());
+    let output = format_result(&result, target_address, &gas_estimate);
+    (result, output)
+}
 
 fn run_demo() {
     let demo_start = Instant::now();
 
     println!("==========================================================");
-    println!("  MultiversX Local Transaction Simulator - POC Demo");
+    println!("  MultiversX Local Transaction Simulator - Scenario Test");
     println!("==========================================================");
     println!();
-    println!("This demo showcases all POC features:");
-    println!("  F1 - Transaction Simulation Engine");
-    println!("  F4 - Gas Cost Prediction (GoVM-inspired)");
-    println!("  Graceful error handling for edge cases");
+    println!("  Contract : counter (init=5)");
+    println!("  State    : {}", DEMO_STATE);
+    println!("  Caller   : {}", DEMO_CALLER);
+    println!();
+    println!("  Running transactions against a SINGLE persistent world.");
+    println!("  State mutations carry across steps.");
     println!();
 
-    // ── Scenario 1: View call ──
-    print_scenario_header(1, "Read query (view function)", "get");
-    run_demo_scenario(DEMO_CONTRACT, "get", DEMO_CALLER, DEMO_STATE);
-
-    // ── Scenario 2: Write transaction ──
-    print_scenario_header(2, "State-changing transaction", "increment");
-    run_demo_scenario(DEMO_CONTRACT, "increment", DEMO_CALLER, DEMO_STATE);
-
-    // ── Scenario 3: Missing account (F2 - DebuggerBackend panic fix) ──
-    print_scenario_header(
-        3,
-        "Missing caller account (graceful error handling)",
-        "increment",
+    // ── Boot a single world ──
+    let mut world = ScenarioWorld::new().executor_config(ExecutorConfig::Experimental);
+    world.register_contract(
+        format!("file:{}", DEMO_CONTRACT).as_str(),
+        counter::ContractBuilder,
     );
-    println!("  State file has NO wallet account - previously caused a DebuggerBackend panic.");
-    println!("  The simulator now catches this and reports it as an error.");
-    println!();
-    run_demo_scenario(
-        DEMO_CONTRACT,
-        "increment",
-        "address:nonexistent_wallet",
-        DEMO_STATE_MISSING,
+    world.register_contract(
+        "file:piggybank/output/piggybank.wasm",
+        piggybank::ContractBuilder,
+    );
+    let state_config = StateConfig::from_file(DEMO_STATE).expect("Failed to load demo state");
+    state_config
+        .apply_to_world(&mut world)
+        .expect("Failed to apply state");
+
+    let mut step = 1u8;
+    let mut passed = 0u8;
+    let mut failed = 0u8;
+
+    // ── Step 1: Read initial counter value → expect 5 ──
+    print_step(step, "Read initial counter value (expect 0x05)");
+    let (result, output) =
+        execute_on_world(&mut world, "get", DEMO_CALLER, DEMO_GAS, DEMO_TARGET, &[]);
+    print_json(&output);
+    assert_step(
+        &result,
+        |r| r.status == response::ExecutionStatus::Success && r.output == vec![vec![5]],
+        "get() returned 0x05",
+        &mut passed,
+        &mut failed,
     );
 
-    // ── Scenario 4: Invalid function name ──
-    print_scenario_header(4, "Calling a non-existent function", "does_not_exist");
-    run_demo_scenario(DEMO_CONTRACT, "does_not_exist", DEMO_CALLER, DEMO_STATE);
+    // ── Step 2: Increment counter (5 → 6) ──
+    step += 1;
+    print_step(step, "Increment counter (5 -> 6)");
+    let (result, output) = execute_on_world(
+        &mut world,
+        "increment",
+        DEMO_CALLER,
+        DEMO_GAS,
+        DEMO_TARGET,
+        &[],
+    );
+    print_json(&output);
+    assert_step(
+        &result,
+        |r| r.status == response::ExecutionStatus::Success,
+        "increment() succeeded",
+        &mut passed,
+        &mut failed,
+    );
 
-    // ── Summary ──
-    let elapsed = demo_start.elapsed();
-    println!("==========================================================");
-    println!("  Demo completed in {:.2}s", elapsed.as_secs_f64());
-    println!("==========================================================");
-}
+    // ── Step 3: Read counter again → expect 6 (proves state persisted) ──
+    step += 1;
+    print_step(step, "Read counter after increment (expect 0x06)");
+    let (result, output) =
+        execute_on_world(&mut world, "get", DEMO_CALLER, DEMO_GAS, DEMO_TARGET, &[]);
+    print_json(&output);
+    assert_step(
+        &result,
+        |r| r.status == response::ExecutionStatus::Success && r.output == vec![vec![6]],
+        "get() returned 0x06 (state mutation verified)",
+        &mut passed,
+        &mut failed,
+    );
 
-/// Execute a demo scenario, catching any VM panics gracefully
-fn run_demo_scenario(contract: &str, function: &str, caller: &str, state_file: &str) {
-    // Suppress default panic output during catch_unwind
+    // ── Step 4: Increment again (6 → 7) ──
+    step += 1;
+    print_step(step, "Increment counter again (6 -> 7)");
+    let (result, output) = execute_on_world(
+        &mut world,
+        "increment",
+        DEMO_CALLER,
+        DEMO_GAS,
+        DEMO_TARGET,
+        &[],
+    );
+    print_json(&output);
+    assert_step(
+        &result,
+        |r| r.status == response::ExecutionStatus::Success,
+        "increment() succeeded",
+        &mut passed,
+        &mut failed,
+    );
+
+    // ── Step 5: Read → expect 7 ──
+    step += 1;
+    print_step(step, "Read counter (expect 0x07 - two increments from 5)");
+    let (result, output) =
+        execute_on_world(&mut world, "get", DEMO_CALLER, DEMO_GAS, DEMO_TARGET, &[]);
+    print_json(&output);
+    assert_step(
+        &result,
+        |r| r.status == response::ExecutionStatus::Success && r.output == vec![vec![7]],
+        "get() returned 0x07 (two increments verified)",
+        &mut passed,
+        &mut failed,
+    );
+
+    // ── Step 6: Call non-existent function → expect error code 1 ──
+    step += 1;
+    print_step(step, "Call non-existent function (expect error)");
+    let (result, output) = execute_on_world(
+        &mut world,
+        "does_not_exist",
+        DEMO_CALLER,
+        DEMO_GAS,
+        DEMO_TARGET,
+        &[],
+    );
+    print_json(&output);
+    assert_step(
+        &result,
+        |r| matches!(r.status, response::ExecutionStatus::Failed { code: 1, .. }),
+        "VM returned error code 1: invalid function",
+        &mut passed,
+        &mut failed,
+    );
+
+    // ── Step 7: Read after failed tx → expect still 7 (failed tx didn't mutate state) ──
+    step += 1;
+    print_step(step, "Read counter after failed tx (expect still 0x07)");
+    let (result, output) =
+        execute_on_world(&mut world, "get", DEMO_CALLER, DEMO_GAS, DEMO_TARGET, &[]);
+    print_json(&output);
+    assert_step(
+        &result,
+        |r| r.status == response::ExecutionStatus::Success && r.output == vec![vec![7]],
+        "State unchanged after failed tx",
+        &mut passed,
+        &mut failed,
+    );
+
+    // ── Step 8: Missing account panic → catch gracefully ──
+    step += 1;
+    print_step(step, "Call from non-existent account (catch VM panic)");
+
     let prev_hook = panic::take_hook();
     panic::set_hook(Box::new(|_| {}));
-
-    let result = panic::catch_unwind(|| {
-        execute_simulation(
-            contract,
-            function,
-            caller,
+    let panic_result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        execute_on_world(
+            &mut world,
+            "increment",
+            "address:nonexistent",
             DEMO_GAS,
-            state_file,
-            &[],
             DEMO_TARGET,
+            &[],
         )
-    });
-
-    // Restore the default panic hook
+    }));
     panic::set_hook(prev_hook);
 
-    match result {
-        Ok(Ok(output)) => print_scenario_result(&output),
-        Ok(Err(e)) => print_scenario_error(&e),
+    match panic_result {
         Err(panic_info) => {
             let msg = if let Some(s) = panic_info.downcast_ref::<String>() {
                 s.clone()
@@ -235,26 +371,363 @@ fn run_demo_scenario(contract: &str, function: &str, caller: &str, state_file: &
                 "Unknown panic".to_string()
             };
             println!("  [CAUGHT VM PANIC] {}", msg);
-            println!("  This is the DebuggerBackend crash (Issue #1267) - now handled gracefully.");
-            println!();
+            println!("  PASS: Panic caught gracefully instead of crashing");
+            passed += 1;
         }
+        Ok(_) => {
+            println!("  FAIL: Expected a panic but call succeeded");
+            failed += 1;
+        }
+    }
+    println!();
+
+    // ── Summary ──
+    let elapsed = demo_start.elapsed();
+    println!("==========================================================");
+    println!(
+        "  {} steps | {} passed | {} failed | {:.2}s",
+        step,
+        passed,
+        failed,
+        elapsed.as_secs_f64()
+    );
+    if failed == 0 {
+        println!("  ALL TESTS PASSED");
+    } else {
+        println!("  SOME TESTS FAILED");
+    }
+    println!("==========================================================");
+
+    if failed > 0 {
+        std::process::exit(1);
     }
 }
 
-fn print_scenario_header(num: u8, description: &str, function: &str) {
-    println!("----------------------------------------------------------");
-    println!("  Scenario {}: {}", num, description);
-    println!("  Function: {}() | Contract: {}", function, DEMO_CONTRACT);
-    println!("----------------------------------------------------------");
-}
+// ── F5: Piggybank Scenario Test ──────────────────────────────────────────
 
-fn print_scenario_result(output: &serde_json::Value) {
-    println!("{}", serde_json::to_string_pretty(output).unwrap());
+const PB_CONTRACT: &str = "piggybank/output/piggybank.wasm";
+const PB_STATE: &str = "examples/piggybank_initial.json";
+const PB_CALLER: &str = "address:owner";
+const PB_TARGET: &str = "sc:piggybank";
+const PB_GAS: u64 = 10_000_000;
+
+fn run_demo_piggybank() {
+    let demo_start = Instant::now();
+
+    println!("==========================================================");
+    println!("  MultiversX Local TX Simulator - Piggybank Scenario Test");
+    println!("==========================================================");
     println!();
+    println!("  Contract : piggybank (target=100, require! validation)");
+    println!("  State    : {}", PB_STATE);
+    println!("  Caller   : {}", PB_CALLER);
+    println!();
+    println!("  Patterns : require! macro, 3x storage mappers,");
+    println!("             conditional logic, deposit/withdraw flow");
+    println!();
+
+    // ── Boot a single world ──
+    let mut world = ScenarioWorld::new().executor_config(ExecutorConfig::Experimental);
+    world.register_contract(
+        format!("file:{}", PB_CONTRACT).as_str(),
+        piggybank::ContractBuilder,
+    );
+    world.register_contract(
+        format!("file:{}", DEMO_CONTRACT).as_str(),
+        counter::ContractBuilder,
+    );
+    let state_config = StateConfig::from_file(PB_STATE).expect("Failed to load piggybank state");
+    state_config
+        .apply_to_world(&mut world)
+        .expect("Failed to apply state");
+
+    let mut step = 0u8;
+    let mut passed = 0u8;
+    let mut failed = 0u8;
+
+    // ── Step 1: Read initial total → expect 0 ──
+    step += 1;
+    print_step(step, "Read initial total (expect 0x00)");
+    let (result, output) =
+        execute_on_world(&mut world, "getTotal", PB_CALLER, PB_GAS, PB_TARGET, &[]);
+    print_json(&output);
+    assert_step(
+        &result,
+        |r| r.status == response::ExecutionStatus::Success && r.output == vec![Vec::<u8>::new()],
+        "getTotal() returned 0 (empty piggybank)",
+        &mut passed,
+        &mut failed,
+    );
+
+    // ── Step 2: Read target → expect 100 (0x64) ──
+    step += 1;
+    print_step(step, "Read savings target (expect 0x64 = 100)");
+    let (result, output) =
+        execute_on_world(&mut world, "getTarget", PB_CALLER, PB_GAS, PB_TARGET, &[]);
+    print_json(&output);
+    assert_step(
+        &result,
+        |r| r.status == response::ExecutionStatus::Success && r.output == vec![vec![100]],
+        "getTarget() returned 0x64 (target=100)",
+        &mut passed,
+        &mut failed,
+    );
+
+    // ── Step 3: Deposit 30 ──
+    step += 1;
+    print_step(step, "Deposit 30 into piggybank");
+    let (result, output) = execute_on_world(
+        &mut world,
+        "deposit",
+        PB_CALLER,
+        PB_GAS,
+        PB_TARGET,
+        &["0x1e"],
+    );
+    print_json(&output);
+    assert_step(
+        &result,
+        |r| r.status == response::ExecutionStatus::Success,
+        "deposit(30) succeeded",
+        &mut passed,
+        &mut failed,
+    );
+
+    // ── Step 4: Read total → expect 30 (0x1e) ──
+    step += 1;
+    print_step(step, "Read total after deposit (expect 0x1e = 30)");
+    let (result, output) =
+        execute_on_world(&mut world, "getTotal", PB_CALLER, PB_GAS, PB_TARGET, &[]);
+    print_json(&output);
+    assert_step(
+        &result,
+        |r| r.status == response::ExecutionStatus::Success && r.output == vec![vec![30]],
+        "getTotal() returned 0x1e (30)",
+        &mut passed,
+        &mut failed,
+    );
+
+    // ── Step 5: Check status → expect 0 (still collecting) ──
+    step += 1;
+    print_step(step, "Check status (expect 0x00 = collecting)");
+    let (result, output) =
+        execute_on_world(&mut world, "getStatus", PB_CALLER, PB_GAS, PB_TARGET, &[]);
+    print_json(&output);
+    assert_step(
+        &result,
+        |r| r.status == response::ExecutionStatus::Success && r.output == vec![Vec::<u8>::new()],
+        "getStatus() returned 0 (still collecting)",
+        &mut passed,
+        &mut failed,
+    );
+
+    // ── Step 6: Deposit 50 ──
+    step += 1;
+    print_step(step, "Deposit 50 into piggybank");
+    let (result, output) = execute_on_world(
+        &mut world,
+        "deposit",
+        PB_CALLER,
+        PB_GAS,
+        PB_TARGET,
+        &["0x32"],
+    );
+    print_json(&output);
+    assert_step(
+        &result,
+        |r| r.status == response::ExecutionStatus::Success,
+        "deposit(50) succeeded",
+        &mut passed,
+        &mut failed,
+    );
+
+    // ── Step 7: Deposit 30 more ──
+    step += 1;
+    print_step(step, "Deposit 30 more (total should reach 110)");
+    let (result, output) = execute_on_world(
+        &mut world,
+        "deposit",
+        PB_CALLER,
+        PB_GAS,
+        PB_TARGET,
+        &["0x1e"],
+    );
+    print_json(&output);
+    assert_step(
+        &result,
+        |r| r.status == response::ExecutionStatus::Success,
+        "deposit(30) succeeded",
+        &mut passed,
+        &mut failed,
+    );
+
+    // ── Step 8: Read total → expect 110 (0x6e) ──
+    step += 1;
+    print_step(step, "Read total (expect 0x6e = 110)");
+    let (result, output) =
+        execute_on_world(&mut world, "getTotal", PB_CALLER, PB_GAS, PB_TARGET, &[]);
+    print_json(&output);
+    assert_step(
+        &result,
+        |r| r.status == response::ExecutionStatus::Success && r.output == vec![vec![110]],
+        "getTotal() returned 0x6e (110)",
+        &mut passed,
+        &mut failed,
+    );
+
+    // ── Step 9: Check status → expect 1 (target reached!) ──
+    step += 1;
+    print_step(step, "Check status (expect 0x01 = TARGET REACHED!)");
+    let (result, output) =
+        execute_on_world(&mut world, "getStatus", PB_CALLER, PB_GAS, PB_TARGET, &[]);
+    print_json(&output);
+    assert_step(
+        &result,
+        |r| r.status == response::ExecutionStatus::Success && r.output == vec![vec![1]],
+        "getStatus() returned 1 (target reached!)",
+        &mut passed,
+        &mut failed,
+    );
+
+    // ── Step 10: Check deposit count → expect 3 ──
+    step += 1;
+    print_step(step, "Read deposit count (expect 0x03)");
+    let (result, output) = execute_on_world(
+        &mut world,
+        "getNumDeposits",
+        PB_CALLER,
+        PB_GAS,
+        PB_TARGET,
+        &[],
+    );
+    print_json(&output);
+    assert_step(
+        &result,
+        |r| r.status == response::ExecutionStatus::Success && r.output == vec![vec![3]],
+        "getNumDeposits() returned 3",
+        &mut passed,
+        &mut failed,
+    );
+
+    // ── Step 11: Withdraw 10 ──
+    step += 1;
+    print_step(step, "Withdraw 10 from piggybank");
+    let (result, output) = execute_on_world(
+        &mut world,
+        "withdraw",
+        PB_CALLER,
+        PB_GAS,
+        PB_TARGET,
+        &["0x0a"],
+    );
+    print_json(&output);
+    assert_step(
+        &result,
+        |r| r.status == response::ExecutionStatus::Success,
+        "withdraw(10) succeeded",
+        &mut passed,
+        &mut failed,
+    );
+
+    // ── Step 12: Read total → expect 100 (0x64) ──
+    step += 1;
+    print_step(step, "Read total after withdraw (expect 0x64 = 100)");
+    let (result, output) =
+        execute_on_world(&mut world, "getTotal", PB_CALLER, PB_GAS, PB_TARGET, &[]);
+    print_json(&output);
+    assert_step(
+        &result,
+        |r| r.status == response::ExecutionStatus::Success && r.output == vec![vec![100]],
+        "getTotal() returned 0x64 (100)",
+        &mut passed,
+        &mut failed,
+    );
+
+    // ── Step 13: Withdraw 200 → expect FAIL (require! "Insufficient funds") ──
+    step += 1;
+    print_step(step, "Withdraw 200 (expect FAIL: insufficient funds)");
+    let (result, output) = execute_on_world(
+        &mut world,
+        "withdraw",
+        PB_CALLER,
+        PB_GAS,
+        PB_TARGET,
+        &["0xc8"],
+    );
+    print_json(&output);
+    assert_step(
+        &result,
+        |r| matches!(r.status, response::ExecutionStatus::Failed { code: 4, .. }),
+        "withdraw(200) failed with require! error",
+        &mut passed,
+        &mut failed,
+    );
+
+    // ── Step 14: Read total after failed tx → expect still 100 ──
+    step += 1;
+    print_step(step, "Read total after failed withdraw (expect still 0x64)");
+    let (result, output) =
+        execute_on_world(&mut world, "getTotal", PB_CALLER, PB_GAS, PB_TARGET, &[]);
+    print_json(&output);
+    assert_step(
+        &result,
+        |r| r.status == response::ExecutionStatus::Success && r.output == vec![vec![100]],
+        "State unchanged after failed tx (still 100)",
+        &mut passed,
+        &mut failed,
+    );
+
+    // ── Summary ──
+    let elapsed = demo_start.elapsed();
+    println!("==========================================================");
+    println!(
+        "  {} steps | {} passed | {} failed | {:.2}s",
+        step,
+        passed,
+        failed,
+        elapsed.as_secs_f64()
+    );
+    if failed == 0 {
+        println!("  ALL TESTS PASSED");
+    } else {
+        println!("  SOME TESTS FAILED");
+    }
+    println!("==========================================================");
+
+    if failed > 0 {
+        std::process::exit(1);
+    }
 }
 
-fn print_scenario_error(err: &SimulationError) {
-    println!("  [ERROR] {}", err);
+fn print_step(num: u8, description: &str) {
+    println!("----------------------------------------------------------");
+    println!("  Step {}: {}", num, description);
+    println!("----------------------------------------------------------");
+}
+
+fn print_json(output: &serde_json::Value) {
+    println!("{}", serde_json::to_string_pretty(output).unwrap());
+}
+
+fn assert_step(
+    result: &TransactionResult,
+    check: impl FnOnce(&TransactionResult) -> bool,
+    label: &str,
+    passed: &mut u8,
+    failed: &mut u8,
+) {
+    if check(result) {
+        println!("  PASS: {}", label);
+        *passed += 1;
+    } else {
+        println!("  FAIL: {}", label);
+        println!("  Got: {:?}", result.status);
+        if !result.output.is_empty() {
+            let hex_vals: Vec<String> = result.output.iter().map(hex::encode).collect();
+            println!("  Output: [{}]", hex_vals.join(", "));
+        }
+        *failed += 1;
+    }
     println!();
 }
 
